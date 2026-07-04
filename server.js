@@ -7,9 +7,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* ================= FIREBASE INIT ================= */
-// IMPORTANT: add your Firebase service account JSON file
-const serviceAccount = require('./serviceAccountKey.json');
+/* ================= FIREBASE INIT (ENV VERSION) ================= */
+
+// Firebase service account comes from Railway environment variable
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
 admin.initializeApp({
     credential: admin.credential.cert(serviceAccount)
@@ -40,7 +41,15 @@ app.post('/api/transfer', async (req, res) => {
 
         console.log('[REQUEST]', req.body);
 
-        // STEP 1: GET USER FROM FIRESTORE
+        // Validation
+        if (!userId || !amount || !transferId) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required fields'
+            });
+        }
+
+        // STEP 1: GET USER FROM FIREBASE
         const userRef = db.collection('users').doc(userId);
         const userSnap = await userRef.get();
 
@@ -53,6 +62,7 @@ app.post('/api/transfer', async (req, res) => {
 
         const userData = userSnap.data();
 
+        // STEP 2: GET TELEGRAM ID FROM FIREBASE
         const tgUserId = Number(userData.telegramId);
 
         if (!tgUserId || tgUserId <= 0) {
@@ -64,7 +74,7 @@ app.post('/api/transfer', async (req, res) => {
 
         console.log('[TG USER ID]', tgUserId);
 
-        // STEP 2: BUILD PAYLOAD FOR XROCKET
+        // STEP 3: BUILD XROCKET PAYLOAD
         const payload = {
             tgUserId: tgUserId,
             currency: 'DOGS',
@@ -75,7 +85,7 @@ app.post('/api/transfer', async (req, res) => {
 
         console.log('[XROCKET PAYLOAD]', payload);
 
-        // STEP 3: CALL XROCKET
+        // STEP 4: CALL XROCKET API
         const response = await fetch(`${XROCKET_API}/app/transfer`, {
             method: 'POST',
             headers: {
@@ -89,7 +99,7 @@ app.post('/api/transfer', async (req, res) => {
 
         console.log('[XROCKET RESPONSE]', data);
 
-        // STEP 4: RETURN RESULT
+        // STEP 5: RETURN RESULT
         if (response.ok && data.success) {
             return res.json({
                 success: true,
@@ -109,7 +119,7 @@ app.post('/api/transfer', async (req, res) => {
 
         return res.status(500).json({
             success: false,
-            error: err.message
+            error: err.message || 'Server error'
         });
     }
 });
