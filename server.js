@@ -1,31 +1,82 @@
 const express = require('express');
 const cors = require('cors');
+const admin = require('firebase-admin');
+
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
-// xRocket API
-const XROCKET_TOKEN = '763c1b85e9cf7b6b3ba95418c';
+/* ================= FIREBASE INIT ================= */
+// IMPORTANT: add your Firebase service account JSON file
+const serviceAccount = require('./serviceAccountKey.json');
+
+admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+});
+
+const db = admin.firestore();
+
+/* ================= XROCKET CONFIG ================= */
+
+const XROCKET_TOKEN = process.env.XROCKET_TOKEN;
 const XROCKET_API = 'https://pay.xrocket.exchange';
+
+/* ================= HEALTH CHECK ================= */
+
+app.get('/api/health', (req, res) => {
+    res.json({
+        success: true,
+        message: 'Server running'
+    });
+});
+
+/* ================= TRANSFER ROUTE ================= */
 
 app.post('/api/transfer', async (req, res) => {
     try {
-        const { tgUserId, currency, amount, transferId, description } = req.body;
 
-        console.log('[TRANSFER] User:', tgUserId, 'Amount:', amount, 'ID:', transferId);
+        const { userId, amount, transferId } = req.body;
 
+        console.log('[REQUEST]', req.body);
+
+        // STEP 1: GET USER FROM FIRESTORE
+        const userRef = db.collection('users').doc(userId);
+        const userSnap = await userRef.get();
+
+        if (!userSnap.exists) {
+            return res.status(404).json({
+                success: false,
+                error: 'User not found'
+            });
+        }
+
+        const userData = userSnap.data();
+
+        const tgUserId = Number(userData.telegramId);
+
+        if (!tgUserId || tgUserId <= 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid Telegram ID in database'
+            });
+        }
+
+        console.log('[TG USER ID]', tgUserId);
+
+        // STEP 2: BUILD PAYLOAD FOR XROCKET
         const payload = {
-            tgUserId: Number(tgUserId),
-            currency: currency || 'DOGS',
+            tgUserId: tgUserId,
+            currency: 'DOGS',
             amount: Number(amount),
-            transferId: transferId,
-            description: description || 'Watch & Earn withdrawal successful'
+            transferId: String(transferId),
+            description: 'Withdrawal from WATCH REWARD'
         };
 
-        console.log('[PAYLOAD]', JSON.stringify(payload));
+        console.log('[XROCKET PAYLOAD]', payload);
 
-        const response = await fetch(XROCKET_API + '/app/transfer', {
+        // STEP 3: CALL XROCKET
+        const response = await fetch(`${XROCKET_API}/app/transfer`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -36,48 +87,34 @@ app.post('/api/transfer', async (req, res) => {
 
         const data = await response.json();
 
-        console.log('[RESPONSE]', JSON.stringify(data));
+        console.log('[XROCKET RESPONSE]', data);
 
+        // STEP 4: RETURN RESULT
         if (response.ok && data.success) {
-            res.json({
+            return res.json({
                 success: true,
                 txId: data.data?.id || transferId,
-                data: data
-            });
-        } else {
-            res.status(400).json({
-                success: false,
-                error: data.message || 'xRocket transfer failed',
-                errors: data.errors || []
+                data
             });
         }
 
-    } catch (error) {
-        console.error('[ERROR]', error);
-
-        res.status(500).json({
+        return res.status(400).json({
             success: false,
-            error: error.message || 'Server error'
+            error: data.message || 'Transfer failed',
+            details: data.errors || []
+        });
+
+    } catch (err) {
+        console.error('[ERROR]', err);
+
+        return res.status(500).json({
+            success: false,
+            error: err.message
         });
     }
 });
 
-app.get('/api/health', (req, res) => {
-    res.json({
-        status: 'ok',
-        service: 'xrocket-transfer-proxy'
-    });
-});
-
-app.get('/api/health', (req, res) => {
-    res.json({
-        status: 'ok',
-        service: 'xrocket-transfer-proxy'
-    });
-});
-
-// Debug - confirms Railway is running the latest code
-console.log("SERVER VERSION 2 - July 4");
+/* ================= START SERVER ================= */
 
 const PORT = process.env.PORT || 3000;
 
