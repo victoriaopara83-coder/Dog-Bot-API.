@@ -69,6 +69,16 @@ app.get('/api/health', (req, res) => {
     });
 });
 
+app.get('/api/health', (req, res) => {
+    res.json({
+        status: 'ok',
+        service: 'xrocket-transfer-proxy'
+    });
+});
+
+// Debug - confirms Railway is running the latest code
+console.log("SERVER VERSION 2 - July 4");
+
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
